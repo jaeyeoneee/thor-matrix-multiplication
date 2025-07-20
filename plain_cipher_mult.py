@@ -2,96 +2,198 @@ import numpy as np
 from func import *
 from diagonal_vector import *
 
-
-def build_subblocks_diagonal_order(A, n):
+def mat_to_lower_diags_head( mat, n, m, c):
     """
-    (d x d) 행렬 A를 (n x n) 크기로 나누고,
-    i = 0..(d_blocks-1)에 대해,
-      A^(i) = { A_{i,0}, A_{i+1,1}, ..., A_{i + d_blocks-1, d_blocks-1} }
-    형태로 묶어서 리턴한다.
-
-    Return 형태 예:
-    diag_subblocks[i] = [ A_{i,0}, A_{i+1,1}, ..., A_{i + (d_blocks-1), (d_blocks-1)} ]
+    mat: m x n size matrix(n>=m) for attention head input - 각 헤드가 들어와서 slot 형태가 된다.
     """
-    d = A.shape[0]
-    d_blocks = d // n
-    diag_subblocks = []
+    # 행렬 shape
+    r, s = mat.shape
 
-    for i in range(d_blocks):
-        sublist = []
-        for offset in range(d_blocks):
-            p = i + offset
-            q = offset
-            # 인덱스가 d_blocks 넘어가면 mod 연산할 수도 있고,
-            # 보통은 i+offset < d_blocks 범위 안에서만 쓰기도 한다.
-            # 여기서는 mod로 처리
-            p_mod = p % d_blocks
-            q_mod = q % d_blocks
+    # mat을 m x n으로 패딩한다.
+    pad_rows = n - s
+    pad_cols = m - r
+    # print(pad_rows, pad_cols)
+    # print(pad_rows, pad_cols)
+    mat_padded = np.pad(mat,
+                        ((0, pad_cols),   # 아래쪽 행
+                        (0, pad_rows)),  # 오른쪽 열
+                        mode='constant',
+                        constant_values=0)
+    
+    print("padded matrix shape:", mat_padded.shape )
+    
+    # diagonal vector extraction
+    diags = []
+    for i in range(m):
+        diags.append(lower_diagonal_vector(mat_padded, i))
+    
+    # m개의 diagonal을 slot에 c개 만큼 넣어준다.
+    slots = []
+    num_slots = m // c
+    gap = 2**15// (n*c)
+    for i in range(num_slots):
+        slot = np.zeros((2**15,))
+        arr = np.concatenate(diags[i*c: (i+1)*c])
+        slot[::gap] = arr
+        slots.append(slot)
 
-            block = get_submatrix(A, n, p_mod, q_mod)
-            sublist.append(block)
-        diag_subblocks.append(sublist)
-    return diag_subblocks
+    return slots
 
-def pack_upper_diags_in_interlaced_form(subblock_list, n, c):
+
+def lower_diag_to_mat_head( C_cipher, n, m, c, origin):
     """
-    subblock_list: A^(i)에 해당하는 n x n sub-block들의 리스트 예:
-      [ A_{i,0}, A_{i+1,1}, ..., A_{...,...} ]
-      각각 (n x n) 크기
-    n: 각 sub-block의 행/열 크기
-    c: 한 ciphertext에 몇 개 diagonal을 묶을지
-    name: 디버깅용 태그("A" 등)
-
-    여기서는
-    pt.A_{i, j, l, r}
-    꼴로 저장한다고 가정. 실제론 4차원 배열이거나 dict 등을 써도 됨.
-
-    간단히, 각 sub-block에서 k=0..(n-1) upper diag를 뽑아서,
-    [c]개씩 interlace/pack하는 식만 스케치.
-    (실제로는 "j, r" 인덱스 등도 필요하지만, 여기서는 형태만 보여줌.)
+    attention head output to matrix format
+    C_cipher: attention haed output
+    n, m: padded matrix size (n >= m)
+    c: the number of stacked diagonal vectors in each slot
+    origin: original matrix size (before padding) to make padded matrix into original size
     """
-    result = dict()
+    
+    gap = 2**15 // (n*c)
+    num_slots = m // c
+    
+    diags = [None] * m
+    for s_idx in range(num_slots):
+        slot = C_cipher[s_idx]
+        arr = slot[::gap][:n*c]
+        blocks = arr.reshape(c, n)
+        for delta in range(c):
+            diag_idx = s_idx * c + delta
+            diags[diag_idx] = blocks[delta]
+    
+    mat = np.zeros((m, n), dtype = diags[0].dtype)
+    for k in range(m):
+        vec = diags[k]
+        for t in range(n):
+            i = (t+k) % m
+            j = t
+            mat[i, j] = vec[t]
+            
+    return mat[:, :origin]
 
-    # i는 총 block의 개수
-    for i in range(d//n):
-        subblock = subblock_list[i]
-        # j는 subblock 안에서
-        for j in range(n//c):
-            for l in range(c):
-                k = l + c * j
-                upper_diag = np.zeros(d)
-                for tmp in range(d):
-                    upper_diag[tmp] = upper_diagonal_vector(subblock[tmp % (d//n)], k)[tmp // (d//n)]
-                # print(upper_diag) 
-                rotated_upper_diag = np.zeros(d * c)
-                for r in range(n//c):
-                    for r_prime in range(c):
-                        rotated_upper_diag[(r_prime)*d: (r_prime+1)*d] = rotate(upper_diag, r_prime*c)
-                    print(rotated_upper_diag)
-                # print(rotated_upper_diag)
-                    
-                    
 
+def plaintext_encoding(mat, d, d_h, c=64):
+    """
+    mat: d_h x d_h size plaintext matrix
+    num: d // d_h
+    c: the number of diagonals of each slt
+    for specific case! needs to be moified for general case.
+    """
+    
+    num = d // d_h
+    slot = np.zeros((2**15,))
+    slots = []
+    gap = 2**15 // (d * c)
+    for j in range(d_h):
+        slot = np.zeros((2**15,))
+        diags = []
+        odiag = upper_diagonal_vector(mat, j)
+        for i in range(c):
+            stacked = []
+            diag = np.roll(odiag, -i)
+            for _ in range(num):
+                stacked.append(diag)
+            concat = np.concatenate(stacked)
+            diags.append(concat)
+        slot[::gap] = np.concatenate(diags)
+        slots.append(slot)
+    # print("slot[0]", slots[0][0*gap], slots[0][(256*2-1)*gap], slots[0][(256*3-2)*gap])
+    print("slot shape:", len(slots))
+    return slots
+            
 
-
+def plain_cipher_mult(A_diags, B_diags, d, n, d_h, c=64):
+    
+    gap = 2**15 // (d * c)
+    rs = []
+    print("A_diags shape:", len(A_diags), len(A_diags[0]), len(A_diags[0][0]))
+    for j in range(len(A_diags)):
+        slot = np.zeros((2**15, ))
+    
+        A_diag = A_diags[j]
+        for i in range(n//d_h):
+            block_diag = A_diag[i]
+            # print(len(block_diag))
+            B_diag = B_diags[i]
+            for k in range(d_h):
+                slot += block_diag[k] * np.roll(B_diag, -d * k * gap)
+        rs.append(slot)
+        
+    return rs
+        
+    
 
 if __name__ == "__main__":
     """
     d는 n으로 나누어진다.
     A의 크기는 dxd이고, B의 크기는 nxd이다. 
     """
-    d = 8
-    n = 4
-    c = 2
-    A = np.arange(1, d * d + 1).reshape(d, d)
-    d_blocks = d // n
-
-    print("=== A ===")
-    print(A)
-
-    diag_subblocks = build_subblocks_diagonal_order(A, n)
-    # print("\n=== A^(i) ===")
-    # for i in range(d_blocks):
-    #     print(f"[*] A^{i} = {diag_subblocks[i]}")
+    d = 256
+    d_h = 64
+    n = 192
+    c = 64
+    num = n // d_h
     
-    pack_upper_diags_in_interlaced_form(diag_subblocks, n, c)
+    # A, B 행렬 생성
+    A = np.arange(1, n*n+1).reshape(n, n)
+    B = np.arange(1, n * d + 1).reshape(n, d)
+    
+    # B를 head별 diagonal vector로 변환
+    diags_B = []
+    for i in range(num):
+        diag = mat_to_lower_diags_head(B[d_h*i:d_h*(i+1), :], d, d_h, c)
+        diags_B.append(diag[0])
+        print(diag[0])
+    print("number of the diagonals:", len(diags_B))
+    print("--------matrix B --------------------")
+    print(B)
+    print("--------diagonal vectors of B --------")
+    print(diags_B)
+    
+    
+    # A를 block 별 diagonal 생성
+    print("---------matrix A --------------------")
+    plaintext_encoding(A[:d_h, :d_h], d, d_h, c)
+    print("--------matrix A[:d_h, :d_h] --------------------")
+    print(A[:d_h, :d_h])
+    print("--------diagonal vectors of A --------")
+    diags_A = plaintext_encoding(A[:d_h, :d_h], d, d_h, c)
+    print(diags_A)
+    
+    diags_A = []
+    for i in range(num):
+        diags = []
+        for j in range(num):
+            diag = plaintext_encoding(A[d_h*i:d_h*(i+1), d_h*j:d_h*(j+1)], d, d_h, c)
+            diags.append(diag)
+        diags_A.append(diags)
+    
+    print("-------------matrix multiplicaion result----------")
+    print("real multiplication result")
+    print(np.matmul(A, B)[:64, :])
+    print("diagonal multiplication result")
+    rs = plain_cipher_mult(diags_A, diags_B, d, n, d_h, c)
+    print(rs)
+    print(len(rs))
+    
+    print("-------------diagonal result comparison ----------")
+    mat = np.matmul(A, B)[:64, :]
+    print("diagonal 0")
+    print("real result:", lower_diagonal_vector(mat, 1))
+    print("diagonal multiplication result:", rs[0][::2][256:256*2])
+    for i in range(1, num):
+        mat = np.matmul(A, B)[d_h*i:d_h*(i+1), :]
+        for j in range(1, d_h):
+            assert np.allclose(lower_diagonal_vector(mat, j), rs[i][::2][256*j:256*(j+1)])
+    
+    print("-------------diagonal result to matrix ----------")
+    full_rows = []
+    
+    for i in range(num):
+        full_rows.append(lower_diag_to_mat_head([rs[i]], d, d_h, c, d))
+    
+    combined_mat = np.vstack(full_rows)
+    
+    assert np.allclose(combined_mat, np.matmul(A, B))
+    
+    
