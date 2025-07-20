@@ -125,45 +125,46 @@ def plain_cipher_mult(A_diags, B_diags, d, n, d_h, c=64):
 
 if __name__ == "__main__":
     """
-    d는 n으로 나누어진다.
-    A의 크기는 dxd이고, B의 크기는 nxd이다. 
+    A: k x n (plaintext) 
+    B: n x d (ciphertext)
+    d_h: block size
     """
+    k = 192
+    n = 768
     d = 256
     d_h = 64
-    n = 192
     c = 64
-    num = n // d_h
     
     # A, B 행렬 생성
-    A = np.arange(1, n*n+1).reshape(n, n)
-    B = np.arange(1, n * d + 1).reshape(n, d)
+    A = np.arange(1, k*n+1).reshape(k, n)
+    B = np.arange(1, n*d+1).reshape(n, d)
     
     # B를 head별 diagonal vector로 변환
     diags_B = []
-    for i in range(num):
+    for i in range(n//d_h):
         diag = mat_to_lower_diags_head(B[d_h*i:d_h*(i+1), :], d, d_h, c)
         diags_B.append(diag[0])
         print(diag[0])
-    print("number of the diagonals:", len(diags_B))
-    print("--------matrix B --------------------")
-    print(B)
-    print("--------diagonal vectors of B --------")
-    print(diags_B)
+    # print("number of the diagonals:", len(diags_B))
+    # print("--------matrix B --------------------")
+    # print(B)
+    # print("--------diagonal vectors of B --------")
+    # print(diags_B)
     
     
-    # A를 block 별 diagonal 생성
-    print("---------matrix A --------------------")
-    plaintext_encoding(A[:d_h, :d_h], d, d_h, c)
-    print("--------matrix A[:d_h, :d_h] --------------------")
-    print(A[:d_h, :d_h])
-    print("--------diagonal vectors of A --------")
-    diags_A = plaintext_encoding(A[:d_h, :d_h], d, d_h, c)
-    print(diags_A)
+    # # A를 block 별 diagonal 생성
+    # print("---------matrix A --------------------")
+    # plaintext_encoding(A[:d_h, :d_h], d, d_h, c)
+    # print("--------matrix A[:d_h, :d_h] --------------------")
+    # print(A[:d_h, :d_h])
+    # print("--------diagonal vectors of A --------")
+    # diags_A = plaintext_encoding(A[:d_h, :d_h], d, d_h, c)
+    # print(diags_A)
     
     diags_A = []
-    for i in range(num):
+    for i in range(k//d_h):
         diags = []
-        for j in range(num):
+        for j in range(n//d_h):
             diag = plaintext_encoding(A[d_h*i:d_h*(i+1), d_h*j:d_h*(j+1)], d, d_h, c)
             diags.append(diag)
         diags_A.append(diags)
@@ -181,7 +182,7 @@ if __name__ == "__main__":
     print("diagonal 0")
     print("real result:", lower_diagonal_vector(mat, 1))
     print("diagonal multiplication result:", rs[0][::2][256:256*2])
-    for i in range(1, num):
+    for i in range(1, k//d_h):
         mat = np.matmul(A, B)[d_h*i:d_h*(i+1), :]
         for j in range(1, d_h):
             assert np.allclose(lower_diagonal_vector(mat, j), rs[i][::2][256*j:256*(j+1)])
@@ -189,7 +190,7 @@ if __name__ == "__main__":
     print("-------------diagonal result to matrix ----------")
     full_rows = []
     
-    for i in range(num):
+    for i in range(k//d_h):
         full_rows.append(lower_diag_to_mat_head([rs[i]], d, d_h, c, d))
     
     combined_mat = np.vstack(full_rows)
