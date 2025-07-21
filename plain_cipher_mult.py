@@ -72,18 +72,19 @@ def lower_diag_to_mat_head( C_cipher, n, m, c, origin):
     return mat[:, :origin]
 
 
-def plaintext_encoding(mat, d, d_h, c=64):
+def _block_plaintext_encoding(mat, d, d_h, c=64):
     """
     mat: d_h x d_h size plaintext matrix
     num: d // d_h
     c: the number of diagonals of each slt
-    for specific case! needs to be moified for general case.
+    for specific case! needs to be moified for general case. (한 헤드가 한 slot에 들어가는 경우)
     """
     
     num = d // d_h
     slot = np.zeros((2**15,))
     slots = []
     gap = 2**15 // (d * c)
+    
     for j in range(d_h):
         slot = np.zeros((2**15,))
         diags = []
@@ -97,11 +98,21 @@ def plaintext_encoding(mat, d, d_h, c=64):
             diags.append(concat)
         slot[::gap] = np.concatenate(diags)
         slots.append(slot)
-    # print("slot[0]", slots[0][0*gap], slots[0][(256*2-1)*gap], slots[0][(256*3-2)*gap])
     print("slot shape:", len(slots))
     return slots
-            
-
+          
+def plaintext_encoding(mat, k, n, d, d_h, c=64):
+    
+    diags_A = []
+    for i in range(k//d_h):
+        diags = []
+        for j in range(n//d_h):
+            diag = _block_plaintext_encoding(mat[d_h*i:d_h*(i+1), d_h*j:d_h*(j+1)], d, d_h, c)
+            diags.append(diag)
+        diags_A.append(diags)
+    return diags_A
+        
+        
 def plain_cipher_mult(A_diags, B_diags, d, n, d_h, c=64):
     
     gap = 2**15 // (d * c)
@@ -145,29 +156,8 @@ if __name__ == "__main__":
         diag = mat_to_lower_diags_head(B[d_h*i:d_h*(i+1), :], d, d_h, c)
         diags_B.append(diag[0])
         print(diag[0])
-    # print("number of the diagonals:", len(diags_B))
-    # print("--------matrix B --------------------")
-    # print(B)
-    # print("--------diagonal vectors of B --------")
-    # print(diags_B)
     
-    
-    # # A를 block 별 diagonal 생성
-    # print("---------matrix A --------------------")
-    # plaintext_encoding(A[:d_h, :d_h], d, d_h, c)
-    # print("--------matrix A[:d_h, :d_h] --------------------")
-    # print(A[:d_h, :d_h])
-    # print("--------diagonal vectors of A --------")
-    # diags_A = plaintext_encoding(A[:d_h, :d_h], d, d_h, c)
-    # print(diags_A)
-    
-    diags_A = []
-    for i in range(k//d_h):
-        diags = []
-        for j in range(n//d_h):
-            diag = plaintext_encoding(A[d_h*i:d_h*(i+1), d_h*j:d_h*(j+1)], d, d_h, c)
-            diags.append(diag)
-        diags_A.append(diags)
+    diags_A = plaintext_encoding(A, k, n, d, d_h, c)
     
     print("-------------matrix multiplicaion result----------")
     print("real multiplication result")
