@@ -141,7 +141,7 @@ if __name__ == "__main__":
     d_h: block size
     """
     k = 192
-    n = 768
+    n = 192
     d = 256
     d_h = 64
     c = 64
