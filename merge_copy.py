@@ -138,5 +138,9 @@ if __name__ == "__main__":
   
   B = np.arange(1, n*n+1).reshape(n, n)
   
-
+  diags = mat_to_lower_diags_head(B, n, n, 64)
+  rs = merge_copy(diags, n, n, c)
+  
+  check_replication(rs, B, n, n, 64)
+  
 
