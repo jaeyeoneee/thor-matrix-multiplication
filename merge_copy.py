@@ -98,6 +98,20 @@ def merge_copy(diags, n, m, c):
   
   return ct_B_prime
 
+def check_replication(ct_B_prime, original_mat, n, m, c):
+  
+  gap = slot // (n*c)
+  
+  for i in range(m):
+    original_diag = lower_diagonal_vector(original_mat, i)
+    
+    slot_vals = ct_B_prime[i]
+
+    for j in range(c):
+      extracted = slot_vals[::gap][j*n:(j+1)*n]
+      assert np.allclose(original_diag, extracted)
+        
+    
 
 if __name__ == "__main__":
   
@@ -106,7 +120,6 @@ if __name__ == "__main__":
   n=256
   c = 64
   mask = _mask_k(n, c)
-  print(mask[0][256*3:256*4+2])
   
   print("-----------test 1: mxn-------------")
   m = 64
@@ -114,16 +127,16 @@ if __name__ == "__main__":
   
   A = np.arange(1, m*n+1).reshape(m, n)
   
-  diags = mat_to_lower_diags_head(A, n, m, 64)
-  
+  diags = mat_to_lower_diags_head(A, n, m, 64)  
   rs = merge_copy(diags, n, m, c)
   
-  print(rs)
+  check_replication(rs, A, n, m, 64)
   
-  # print("----------test 2: nxn--------------")
-  # n=256
   
-  # B = np.arange(1, n*n+1).reshape(n, n)
+  print("----------test 2: nxn--------------")
+  n=256
+  
+  B = np.arange(1, n*n+1).reshape(n, n)
   
 
 
